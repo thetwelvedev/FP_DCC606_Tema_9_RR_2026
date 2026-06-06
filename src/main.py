@@ -2,29 +2,7 @@ import random
 import time
 import z3
 
-def simular_interdicao_simbolica(solver, d, x, n):
-    """
-    Injeta a possibilidade de QUALQUER aresta do sistema ser interditada.
-    O Z3 tentará encontrar qual interdição específica quebra a segurança do software.
-    """
-    # 1. Criar uma matriz de variáveis booleanas para os bloqueios
-    bloqueios = [[z3.Bool(f"bloqueio_{i}_{j}") for j in range(n)] for i in range(n)]
-    
-    # 2. Se a aresta i->j for interditada, o custo dela vai para 9999
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                # Se bloqueio for True, d[i][j] == 9999. Se for False, mantém a lógica original.
-                solver.add(z3.Implies(bloqueios[i][j] == True, d[i][j] == 9999))
-    
-    # 3. Restrição Ciberfísica: Garantir que exatamente 1 aresta do grafo falhará
-    # No Z3, True conta como 1 e False como 0 em somatórios se convertermos para Int
-    total_bloqueios = z3.Sum([z3.If(bloqueios[i][j], 1, 0) for i in range(n) for j in range(n) if i != j])
-    
-    solver.add(total_bloqueios == 1)
-
-
-def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, restricoes_adicionais=None):
+def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, usar_interdicao=False, restricoes_adicionais=None):
     solver = z3.Solver()
     
     # 1. Instanciação de Variáveis de Decisão do Caminho (X_ij)
@@ -35,6 +13,12 @@ def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, restricoes_adic
     
     # 3. Criação da Matriz de Distância Simbólica
     d = [[z3.Int(f"d_{i}_{j}") for j in range(n)] for i in range(n)]
+
+    if usar_interdicao:
+        bloqueios = [[z3.Bool(f"bloqueio_{i}_{j}") for j in range(n)] for i in range(n)]
+        # Garante que exatamente 1 aresta falhará no grafo todo
+        total_bloqueios = z3.Sum([z3.If(bloqueios[i][j], 1, 0) for i in range(n) for j in range(n) if i != j])
+        solver.add(total_bloqueios == 1)
     
     for i in range(n):
         for j in range(n):
@@ -43,7 +27,12 @@ def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, restricoes_adic
                 solver.add(x[i][j] == 0)
             else:
                 if isinstance(matriz_base[i][j], int):
-                    solver.add(d[i][j] == matriz_base[i][j])
+                    if restricoes_adicionais:
+                        # LEITURA: Se estiver bloqueado, o custo vira 9999. 
+                        # Se NÃO estiver bloqueado, assume o valor original da matriz.
+                        solver.add(d[i][j] == z3.If(bloqueios[i][j], 9999, matriz_base[i][j]))
+                    else:
+                        solver.add(d[i][j] == matriz_base[i][j])
                 solver.add(d[i][j] >= 0)
 
     # 4. Restrições do Domínio das Variáveis de Decisão
@@ -121,7 +110,7 @@ def gerar_matriz_controle(n, min_dist=10, max_dist=50):
             
     return matriz
 
-def executar_ensaio_estresse(restricoes_adicionais=None):
+def executar_ensaio_estresse(usar_interdicao=False, restricoes_adicionais=None):
     """
     Automatiza os testes para os tamanhos exigidos no relatório (4x4, 6x6, 8x8)
     e exibe os resultados formatados no padrão da Tabela 8.
@@ -146,6 +135,7 @@ def executar_ensaio_estresse(restricoes_adicionais=None):
             n=n, 
             matriz_base=matriz_teste, 
             custo_max_simbolico=custo_max_seguranca,
+            usar_interdicao=usar_interdicao,
             restricoes_adicionais=restricoes_adicionais
         )
         
@@ -161,5 +151,5 @@ if __name__ == "__main__":
     random.seed(42)
     
     print("=== INICIANDO ENSAIO DE ESTRESSE COMPUTACIONAL (SMT SOLVER) ===")
-    executar_ensaio_estresse(simular_interdicao_simbolica)
+    executar_ensaio_estresse(usar_interdicao=True)
     print("-" * 80)
