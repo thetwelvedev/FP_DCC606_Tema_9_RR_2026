@@ -35,7 +35,7 @@ def executar_ensaio_estresse(usar_interdicao=False, restricoes_adicionais=None):
         
         # 2. Define um teto de segurança arbitrário para testar o solver
         # Vamos colocar um teto baixo para forçar o Z3 a trabalhar procurando falhas (SAT)
-        custo_max_seguranca = n * 80 
+        custo_max_seguranca = n * 80
         
         # 3. Chama o verificador formal
         res = verificar_seguranca_tsp(

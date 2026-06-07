@@ -1,6 +1,42 @@
 import time
 import z3
 
+def simular_restricao_energia_cps(solver, d, x, n, bateria_maxima=15000):
+    """
+    Injeta restrições físicas de consumo de bateria no solver Z3.
+    Assume que o consumo elétrico é proporcional à distância, mas possui um
+    fator de desgaste/atrito que varia de acordo com a aresta (ex: subidas ou vento).
+    """
+    # 1. Definir uma taxa de consumo básico para cada aresta (pode ser fixa ou simbólica)
+    # Para o teste, vamos criar uma taxa de consumo simulada: arestas com índices ímpares gastam mais.
+    consumo_aresta = [[0 for _ in range(n)] for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                # Simulando que ir para nós mais distantes ou ímpares consome 2x mais energia
+                fator_atrito = 2 if (i + j) % 2 == 0 else 1.0
+                consumo_aresta[i][j] = fator_atrito
+
+    # 2. Montar a equação do Consumo Total de Energia da Rota
+    # Energia = Somatório de (Distância * Taxa de Consumo * Se a aresta foi usada)
+    energia_total = z3.Sum([
+        d[i][j] * consumo_aresta[i][j] * x[i][j] 
+        for i in range(n) for j in range(n)
+    ])
+    
+    # 3. Criar a variável simbólica para o teto da bateria
+    Emax = z3.Int("Emax")
+    solver.add(Emax == bateria_maxima)
+    
+    # 4. Modificar a condição de busca por falhas:
+    # O sistema falhará se o custo estourar Cmax OU se a energia estourar Emax
+    # Como já adicionamos (custo_total > Cmax) no corpo principal, aqui usamos um Or lógico
+    # Ou simplesmente adicionamos a condição de que a falha de energia também é um alvo:
+    #solver.add(energia_total > Emax)
+
+    # Retorna a expressão de falha em vez de injetar direto com AND
+    return energia_total > Emax
+
 def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, usar_interdicao=False, restricoes_adicionais=None):
     solver = z3.Solver()
     
@@ -26,7 +62,7 @@ def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, usar_interdicao
                 solver.add(x[i][j] == 0)
             else:
                 if isinstance(matriz_base[i][j], int):
-                    if restricoes_adicionais:
+                    if usar_interdicao:
                         # LEITURA: Se estiver bloqueado, o custo vira 9999. 
                         # Se NÃO estiver bloqueado, assume o valor original da matriz.
                         solver.add(d[i][j] == z3.If(bloqueios[i][j], 9999, matriz_base[i][j]))
@@ -61,11 +97,20 @@ def verificar_seguranca_tsp(n, matriz_base, custo_max_simbolico, usar_interdicao
     solver.add(Cmax == custo_max_simbolico)
     
     # Condição de Erro / Busca por Falhas
-    solver.add(custo_total > Cmax)
+    #solver.add(custo_total > Cmax)
     
+    # Construção inteligente da condição de ERRO
+    condicao_falha_tempo = (custo_total > Cmax)
+
     # Injeção de restrições de estresse dinâmico (se fornecidas)
-    if restricoes_adicionais:
-        restricoes_adicionais(solver, d, x, n)  
+    if restricoes_adicionais is not None:
+        # Pega a expressão da falha de energia (energia_total > Emax)
+        condicao_falha_energia = restricoes_adicionais(solver, d, x, n, bateria_maxima=custo_max_simbolico)
+        # O sistema quebra se falhar o tempo OU a energia (Uso correto do z3.Or)
+        solver.add(z3.Or(condicao_falha_tempo, condicao_falha_energia))
+    else:
+        # Se não houver análise de energia, foca apenas na falha de tempo padrão
+        solver.add(condicao_falha_tempo) 
 
     # 9. Verificação e Métricas (CORRIGIDO PARA PYTHON 3.13)
     start_time = time.time()
