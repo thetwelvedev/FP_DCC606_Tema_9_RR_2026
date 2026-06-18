@@ -1,0 +1,5 @@
+z3-solver==4.15.0
+openpyxl
+pandas
+matplotlib
+numpy
